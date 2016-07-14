@@ -11,6 +11,11 @@
 # Paste any required PEM certificates after the pem key.
 #
 
+# Working credentials, no need to replace
+adyen:
+  some_credential: SOMECREDENTIAL
+  another_credential: ANOTHERCREDENTIAL
+
 allied_wallet:
   site_id: site_id
   merchant_id: merchant_id
