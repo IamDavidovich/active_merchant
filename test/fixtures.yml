@@ -13,8 +13,9 @@
 
 # Working credentials, no need to replace
 adyen:
-  some_credential: SOMECREDENTIAL
-  another_credential: ANOTHERCREDENTIAL
+  merchant: 'BigCommerceCOM'
+  username: 'ws@Company.BigCommerce'
+  password: 'SellM0re!SellM0re!SellM0re!'
 
 allied_wallet:
   site_id: site_id
