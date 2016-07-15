@@ -15,7 +15,38 @@ module ActiveMerchant #:nodoc:
       # Adyen expects non-decimal values
       self.money_format = :cents
 
-      STANDARD_ERROR_CODE_MAPPING = {}
+      # Not sure if this is even worth it. Most of the codes don't map back to the very limited standard set.
+      STANDARD_ERROR_CODE_MAPPING = {
+        # '3d-secure: Authentication failed' => STANDARD_ERROR_CODE[],
+        # 'Acquirer Fraud' => STANDARD_ERROR_CODE[],
+        # 'Blocked Card' => STANDARD_ERROR_CODE[],
+        # 'Cancelled' => STANDARD_ERROR_CODE[],
+        'CVC Declined' => STANDARD_ERROR_CODE[:incorrect_cvc],
+        # 'Refused' => STANDARD_ERROR_CODE[],
+        'Declined Non Generic' => STANDARD_ERROR_CODE[:card_declined],
+        # 'Acquirer Error' => STANDARD_ERROR_CODE[],
+        'Expired Card' => STANDARD_ERROR_CODE[:expired_card],
+        # 'FRAUD' => STANDARD_ERROR_CODE[],
+        # 'FRAUD-CANCELLED' => STANDARD_ERROR_CODE[],
+        # 'Invalid Amount' => STANDARD_ERROR_CODE[],
+        'Invalid Card Number' => STANDARD_ERROR_CODE[:invalid_number],
+        'Invalid Pin' => STANDARD_ERROR_CODE[:incorrect_pin],
+        # 'Issuer Unavailable' => STANDARD_ERROR_CODE[],
+        # 'Not enough balance' => STANDARD_ERROR_CODE[],
+        # 'Not Submitted' => STANDARD_ERROR_CODE[],
+        # 'Not supported' => STANDARD_ERROR_CODE[],
+        # 'Pending' => STANDARD_ERROR_CODE[],
+        # 'Pin tries exceeded' => STANDARD_ERROR_CODE[],
+        # 'Pin validation not possible' => STANDARD_ERROR_CODE[],
+        # 'Referral' => STANDARD_ERROR_CODE[],
+        # 'Restricted Card' => STANDARD_ERROR_CODE[],
+        # 'Revocation Of Auth' => STANDARD_ERROR_CODE[],
+        # 'Shopper Cancelled' => STANDARD_ERROR_CODE[],
+        # 'Withdrawal count exceeded' => STANDARD_ERROR_CODE[],
+        # 'Withdrawal amount exceeded' => STANDARD_ERROR_CODE[],
+        # 'Transaction Not Permitted' => STANDARD_ERROR_CODE[],
+        # 'Unknown' => STANDARD_ERROR_CODE[]
+      }
 
       def initialize(options={})
         # * <tt>:order_id</tt> - The order number
@@ -34,7 +65,9 @@ module ActiveMerchant #:nodoc:
       end
 
       def purchase(money, payment_method, options={})
-        authorize(money, payment_method, options) # @todo Figure out whether this should just be separate auth and capture calls.
+        response = authorize(money, payment_method, options)
+        return response unless response.success?
+        capture(money, response.authorization)
       end
 
       def authorize(money, payment_method, options={})
@@ -48,22 +81,33 @@ module ActiveMerchant #:nodoc:
       end
 
       def capture(money, authorization, options={})
-        commit('capture', request)
+        request = {}
+        add_modificaiton_amount(request, money, options)
+        add_original_reference(request, authorization)
+
+        commit(:capture, request)
       end
 
       def refund(money, authorization, options={})
-        commit('refund', request)
+        request = {}
+        add_modificaiton_amount(request, money, options)
+        add_original_reference(request, authorization)
+
+        commit(:refund, request)
       end
 
       def void(authorization, options={})
-        commit('void', request)
+        request = {}
+        add_original_reference(request, authorization)
+
+        commit(:cancel, request)
       end
 
       def verify(credit_card, options={})
-        MultiResponse.run(:use_first_response) do |r|
-          r.process { authorize(100, credit_card, options) }
-          r.process(:ignore_result) { void(r.authorization, options) }
-        end
+        # MultiResponse.run(:use_first_response) do |r|
+        #   r.process { authorize(100, credit_card, options) }
+        #   r.process(:ignore_result) { void(r.authorization, options) }
+        # end
       end
 
       def supports_scrubbing?
@@ -72,6 +116,9 @@ module ActiveMerchant #:nodoc:
 
       def scrub(transcript)
         transcript
+          .gsub(%r((Authorization: Basic )\w+), '\1[FILTERED]')
+          .gsub(%r((&?number[^a-zA-Z\d]+)\d+(&?)), '\1[FILTERED]\2')
+          .gsub(%r((&?cvc[^a-zA-Z\d]+)\d+(&?)), '\1[FILTERED]\2')
       end
 
       private
@@ -79,23 +126,11 @@ module ActiveMerchant #:nodoc:
       def add_customer_data(request, options)
         request[:shopperIP] = options[:ip]
         request[:shopperEmail] = options[:email]
-        request[:shopperReference] = options[:shopperEmail] # @todo should this be the customer ID? Can we get that?
+        request[:shopperReference] = options[:email] # @todo should this be the customer ID? Can we get that?
       end
 
       def add_merchant_data(request, options={})
         request[:merchantAccount] = options.empty? ? @options[:merchant] : options[:merchant]
-      end
-
-      def add_address(request, creditcard, options)
-        # :name
-        # :company
-        # :address1
-        # :address2
-        # :city
-        # :state
-        # :country
-        # :zip
-        # :phone
       end
 
       def add_invoice(request, options)
@@ -108,6 +143,17 @@ module ActiveMerchant #:nodoc:
           value: amount(money),
           currency: (options[:currency] || currency(money))
         }
+      end
+
+      def add_modificaiton_amount(request, money, options)
+        request[:modificationAmount] = {
+          value: amount(money),
+          currency: (options[:currency] || currency(money))
+        }
+      end
+
+      def add_original_reference(request, ref)
+        request[:originalReference] = ref
       end
 
       def add_payment_method(request, payment_method)
@@ -133,18 +179,25 @@ module ActiveMerchant #:nodoc:
       def commit(action, parameters)
         add_merchant_data(parameters)
 
-        response = parse(ssl_post(url(action), request_data(action, parameters), headers))
+        response = begin
+          parse(ssl_post(url(action), request_data(action, parameters), headers))
+        rescue ActiveMerchant::ResponseError => e
+          # Adyen returns HTTP status codes that trigger exceptions in a range of circumstances that we should recover
+          # from. To get some sane messages back we need to extract the original response from the exception.
+          raise e unless %w(400 403 404 422 500).include?(e.response.code)
+          parse(e.response.body)
+        end
 
-        binding.pry
+        success = success_from(action, response)
 
         Response.new(
-          success_from(action, response),
-          message_from(action, response),
+          success,
+          message_from(action, response, success),
           response,
           authorization: authorization_from(action, response),
           # avs_result: AVSResult.new(code: response["some_avs_response_key"]),
           # cvv_result: CVVResult.new(response["some_cvv_response_key"]),
-          # error_code: error_code_from(response)
+          error_code: error_code_from(action, response, success),
           test: test?
         )
       end
@@ -155,11 +208,12 @@ module ActiveMerchant #:nodoc:
 
       def success_from(action, response)
         return response[:resultCode] == 'Authorised' if action == :authorise
-        response[:resultCode] == "[#{action.to_s}-received]"
+        response[:response] == "[#{action.to_s}-received]"
       end
 
-      def message_from(action, response)
-        if success_from(action, response)
+      def message_from(action, response, success=nil)
+        success = success.nil? ? success_from(action, response) : success
+        if success
           'Succeeded'
         else
           response[:refusalReason] || "Error #{response[:errorCode]} - #{response[:message]}"
@@ -174,10 +228,15 @@ module ActiveMerchant #:nodoc:
         recursively_compact_hash(parameters).to_json
       end
 
-      def error_code_from(response)
-        unless success_from(response)
-          # TODO: lookup error code for this response
+      def error_code_from(action, response, success=nil)
+        success = success.nil? ? success_from(action, response) : success
+        unless success
+          action == :authorise ? map_error_codes(response[:refusalReason]) : response[:result]
         end
+      end
+
+      def map_error_codes(error)
+        STANDARD_ERROR_CODE_MAPPING[error] || error
       end
 
       def headers

@@ -7,7 +7,7 @@ class RemoteAdyenTest < Test::Unit::TestCase
 
     @amount = 100
     @credit_card = credit_card('4111111111111111', verification_value: '737', month: '08', year: '2018')
-    @declined_card = credit_card('4111111111111112', verification_value: '737', month: '08', year: '2018')
+    @declined_card = credit_card('4111111111111111', verification_value: '123', month: '08', year: '2018')
     @options = {
       invoice: '123456',
       ip: '192.168.0.1'
@@ -24,87 +24,87 @@ class RemoteAdyenTest < Test::Unit::TestCase
   def test_successful_purchase_with_more_options
     options = {
       order_id: '1',
-      ip: "127.0.0.1",
+      customer: 'Joe Example',
       email: "joe@example.com"
     }
 
-    response = @gateway.purchase(@amount, @credit_card, options)
+    response = @gateway.purchase(@amount, @credit_card, @options.merge(options))
     assert_success response
     assert_equal 'Succeeded', response.message
   end
 
-  # def test_failed_purchase
-  #   response = @gateway.purchase(@amount, @declined_card, @options)
-  #   assert_failure response
-  #   assert_equal 'REPLACE WITH FAILED PURCHASE MESSAGE', response.message
-  # end
+  def test_failed_purchase
+    response = @gateway.purchase(@amount, @declined_card, @options)
+    assert_failure response
+    assert_equal 'CVC Declined', response.message
+  end
 
-  # def test_successful_authorize_and_capture
-  #   auth = @gateway.authorize(@amount, @credit_card, @options)
-  #   assert_success auth
+  def test_successful_authorize_and_capture
+    auth = @gateway.authorize(@amount, @credit_card, @options)
+    assert_success auth
 
-  #   assert capture = @gateway.capture(@amount, auth.authorization)
-  #   assert_success capture
-  #   assert_equal 'REPLACE WITH SUCCESS MESSAGE', response.message
-  # end
+    assert capture = @gateway.capture(@amount, auth.authorization)
+    assert_success capture
+    assert_equal 'Succeeded', capture.message
+  end
 
-  # def test_failed_authorize
-  #   response = @gateway.authorize(@amount, @declined_card, @options)
-  #   assert_failure response
-  #   assert_equal 'REPLACE WITH FAILED AUTHORIZE MESSAGE', response.message
-  # end
+  def test_failed_authorize
+    response = @gateway.authorize(@amount, @declined_card, @options)
+    assert_failure response
+    assert_equal 'CVC Declined', response.message
+  end
 
-  # def test_partial_capture
-  #   auth = @gateway.authorize(@amount, @credit_card, @options)
-  #   assert_success auth
+  def test_partial_capture
+    auth = @gateway.authorize(@amount, @credit_card, @options)
+    assert_success auth
 
-  #   assert capture = @gateway.capture(@amount-1, auth.authorization)
-  #   assert_success capture
-  # end
+    assert capture = @gateway.capture(@amount-1, auth.authorization)
+    assert_success capture
+  end
 
-  # def test_failed_capture
-  #   response = @gateway.capture(@amount, '')
-  #   assert_failure response
-  #   assert_equal 'REPLACE WITH FAILED CAPTURE MESSAGE', response.message
-  # end
+  def test_failed_capture
+    response = @gateway.capture(@amount, '')
+    assert_failure response
+    assert_equal 'Error 167 - Original pspReference required for this operation', response.message
+  end
 
-  # def test_successful_refund
-  #   purchase = @gateway.purchase(@amount, @credit_card, @options)
-  #   assert_success purchase
+  def test_successful_refund
+    purchase = @gateway.purchase(@amount, @credit_card, @options)
+    assert_success purchase
 
-  #   assert refund = @gateway.refund(@amount, purchase.authorization)
-  #   assert_success refund
-  #   assert_equal 'REPLACE WITH SUCCESSFUL REFUND MESSAGE', refund.message
-  # end
+    assert refund = @gateway.refund(@amount, purchase.authorization)
+    assert_success refund
+    assert_equal 'Succeeded', refund.message
+  end
 
-  # def test_partial_refund
-  #   purchase = @gateway.purchase(@amount, @credit_card, @options)
-  #   assert_success purchase
+  def test_partial_refund
+    purchase = @gateway.purchase(@amount, @credit_card, @options)
+    assert_success purchase
 
-  #   assert refund = @gateway.refund(@amount-1, purchase.authorization)
-  #   assert_success refund
-  # end
+    assert refund = @gateway.refund(@amount-1, purchase.authorization)
+    assert_success refund
+  end
 
-  # def test_failed_refund
-  #   response = @gateway.refund(@amount, '')
-  #   assert_failure response
-  #   assert_equal 'REPLACE WITH FAILED REFUND MESSAGE', response.message
-  # end
+  def test_failed_refund
+    response = @gateway.refund(@amount, '')
+    assert_failure response
+    assert_equal 'Error 167 - Original pspReference required for this operation', response.message
+  end
 
-  # def test_successful_void
-  #   auth = @gateway.authorize(@amount, @credit_card, @options)
-  #   assert_success auth
+  def test_successful_void
+    auth = @gateway.authorize(@amount, @credit_card, @options)
+    assert_success auth
 
-  #   assert void = @gateway.void(auth.authorization)
-  #   assert_success void
-  #   assert_equal 'REPLACE WITH SUCCESSFUL VOID MESSAGE', void.message
-  # end
+    assert void = @gateway.void(auth.authorization)
+    assert_success void
+    assert_equal 'Succeeded', void.message
+  end
 
-  # def test_failed_void
-  #   response = @gateway.void('')
-  #   assert_failure response
-  #   assert_equal 'REPLACE WITH FAILED VOID MESSAGE', response.message
-  # end
+  def test_failed_void
+    response = @gateway.void('')
+    assert_failure response
+    assert_equal 'Error 167 - Original pspReference required for this operation', response.message
+  end
 
   # def test_successful_verify
   #   response = @gateway.verify(@credit_card, @options)
@@ -119,8 +119,8 @@ class RemoteAdyenTest < Test::Unit::TestCase
   # end
 
   # def test_invalid_login
-  #   gateway = AdyenGateway.new(login: '', password: '')
-
+  #   gateway = AdyenGateway.new(merchant: '', username: '', password: '')
+  #
   #   response = gateway.purchase(@amount, @credit_card, @options)
   #   assert_failure response
   #   assert_match %r{REPLACE WITH FAILED LOGIN MESSAGE}, response.message
@@ -135,15 +135,15 @@ class RemoteAdyenTest < Test::Unit::TestCase
   #   dump_transcript_and_fail(@gateway, @amount, @credit_card, @options)
   # end
 
-  # def test_transcript_scrubbing
-  #   transcript = capture_transcript(@gateway) do
-  #     @gateway.purchase(@amount, @credit_card, @options)
-  #   end
-  #   transcript = @gateway.scrub(transcript)
+  def test_transcript_scrubbing
+    transcript = capture_transcript(@gateway) do
+      @gateway.purchase(@amount, @credit_card, @options)
+    end
+    transcript = @gateway.scrub(transcript)
 
-  #   assert_scrubbed(@credit_card.number, transcript)
-  #   assert_scrubbed(@credit_card.verification_value, transcript)
-  #   assert_scrubbed(@gateway.options[:password], transcript)
-  # end
+    assert_scrubbed(@credit_card.number, transcript)
+    assert_scrubbed(@credit_card.verification_value, transcript)
+    assert_scrubbed(@gateway.options[:password], transcript)
+  end
 
 end
